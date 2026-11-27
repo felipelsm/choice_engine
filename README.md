@@ -18,7 +18,7 @@ action = personality * state
 
 ### Rules
 
-- The sim starts with 100 creatures with fully random personalities (every entry 0 to 1)
+- The sim starts with 20 creatures with random personalities: every entry 0 to 1, plus a bias on the main diagonal (`DIAGONAL_BIAS` in `src/creature.rs`)
 - Every 5 ticks, every creature loses 10% of a full stomach of food and water
 - Standing at a food or water source refills it; resting lowers boredom
 - Reproducing makes one child and costs 30% food, water and boredom. It needs at least 30% food and water, and the child starts with the 30% that was spent

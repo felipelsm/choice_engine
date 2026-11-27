@@ -154,12 +154,21 @@ fn argmax(v: &ActionVec) -> usize {
     best
 }
 
-/// Fully random personality: every entry uniform in 0..1, no bias.
+/// Extra weight added to the main diagonal of new random personalities
+/// (hunger -> food, thirst -> water, boredom -> rest, health -> reproduce).
+/// 0.0 = fully random. Bigger = more "sensible" starting creatures.
+pub const DIAGONAL_BIAS: f32 = 0.5;
+
+/// Random personality: every entry uniform in 0..1, plus DIAGONAL_BIAS on
+/// the main diagonal.
 pub fn random_personality() -> Personality {
     let mut p = [[0.0; N_STATES]; N_ACTIONS];
-    for row in p.iter_mut() {
-        for v in row.iter_mut() {
+    for (row, values) in p.iter_mut().enumerate() {
+        for (col, v) in values.iter_mut().enumerate() {
             *v = fastrand::f32();
+            if row == col {
+                *v += DIAGONAL_BIAS;
+            }
         }
     }
     p
