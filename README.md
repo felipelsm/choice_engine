@@ -1,47 +1,35 @@
-# civsim
+# CHOICE engine
 
-Top-down civilization simulator in Rust.
+**C**hoice and **H**esitation **O**ver **I**nteractions with **C**oncurrent **E**ntities
 
-## Run
+A top-down civilization simulator written in Rust.
 
-```
-cargo run               # window (Esc to quit)
-cargo run -- --headless # no window, prints 10 seconds of decisions
-cargo test
-```
+## What it does right now
 
-On Linux the placeholder window (minifb) needs X11 dev libs, e.g. `libx11-dev libxkbcommon-dev` (on NixOS add `xorg.libX11` and `libxkbcommon` to your shell).
-
-## How creatures think
-
-Every second (the decision tick) each creature does:
+Creatures wander a 2D world with food and water. Every second, each one makes a decision:
 
 ```
 action = personality * state
-
-[ food  ]   [ p00 p01 p02 ]   [ hunger  ]
-[ water ] = [ p10 p11 p12 ] * [ thirst  ]
-[ dance ]   [ p20 p21 p22 ]   [ boredom ]
 ```
 
-The action vector is normalized into likelihoods (sums to 1) and the top one is picked.
-Between ticks, hunger/thirst/boredom keep rising, and doing the chosen action lowers the matching need.
+- **state** is a vector of needs: hunger, thirst, boredom
+- **personality** is a 3x3 matrix, different for every creature
+- **action** gives a score for each option (walk to food, walk to water, dance), and the creature picks the highest
 
-Personalities are random but biased toward the diagonal (hunger mostly pushes toward food, etc.). Change `random_personality()` in `src/creature.rs` for stranger creatures.
+Needs grow over time and drop when the creature does the matching action.
 
-## Drawing
+## Running
 
-On screen: green squares are food, blue squares are water. Creature color shows the current action (green = food, blue = water, pink = dance), and the three bars over each one are hunger, thirst and boredom.
+```
+cargo run               # opens a window (Esc to quit)
+cargo run -- --headless # no window, prints decisions to the terminal
+cargo test
+```
 
-## Graphics / swapping in your own rasterizer
+## Graphics
 
-All drawing goes through the `Renderer` trait in `src/render.rs`
-(`clear`, `fill_rect`, `fill_circle`, `present`). The sim never touches minifb directly.
-To use a different rasterizer, implement `Renderer` for its wrapper type and change the one line in `main.rs` that creates `MinifbRenderer`.
+All drawing goes through the `Renderer` trait in `src/render.rs`. Right now it uses minifb as a placeholder. The plan is to swap in a custom C rasterizer with a Rust wrapper.
 
-## Layout
+## License
 
-- `src/creature.rs` holds the state vector, personality matrix and decision logic
-- `src/world.rs` holds resources, the decision tick, movement and drawing
-- `src/render.rs` holds the renderer trait and the placeholder minifb backend
-- `src/main.rs` holds the game loop
+MIT
