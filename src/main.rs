@@ -9,12 +9,12 @@ use std::time::Instant;
 use ui::{App, PANEL_W};
 
 const WORLD_W: usize = 760;
-const HEIGHT: usize = 600;
+const HEIGHT: usize = 720;
 
 fn main() {
     // `cargo run -- --headless` runs without a window and prints a summary.
     if std::env::args().any(|a| a == "--headless") {
-        run_headless(300);
+        run_headless(900);
         return;
     }
 
@@ -51,11 +51,33 @@ fn run_headless(ticks: u64) {
     while app.world.ticks < ticks && app.phase == ui::Phase::Running {
         if app.update(dt) && app.world.ticks % 10 == 0 {
             let w = &app.world;
-            print!("tick {:>4}  pop {:>4}  births {:>4}  deaths {:>4}", w.ticks, w.creatures.len(), w.births, w.deaths);
-            if let Some(p) = w.average_personality() {
-                print!("  avg diag [{:.2} {:.2} {:.2}]", p[0][0], p[1][1], p[2][2]);
-            }
-            println!();
+            let counts = w.action_counts();
+            let mut top: Vec<(usize, usize)> = counts.iter().copied().enumerate().collect();
+            top.sort_by(|a, b| b.1.cmp(&a.1));
+            let top: Vec<String> = top
+                .iter()
+                .take(4)
+                .filter(|(_, n)| *n > 0)
+                .map(|(i, n)| format!("{} {}", creature::ACTIONS[*i].short(), n))
+                .collect();
+            let causes: Vec<String> = world::DEATH_CAUSES
+                .iter()
+                .zip(w.deaths_by)
+                .map(|((_, name), n)| format!("{}{}", &name[..2], n))
+                .collect();
+            println!(
+                "tick {:>4}  pop {:>4}  born {:>5}  died {:>5} ({})  villages {:>2}  shelters {:>2}  farms {:>2}  stored {:>5.1}  | {}",
+                w.ticks,
+                w.creatures.len(),
+                w.births,
+                w.deaths,
+                causes.join(" "),
+                w.active_villages(),
+                w.shelters_built(),
+                w.farms(),
+                w.total_stock(),
+                top.join(", ")
+            );
         }
     }
     if app.world.creatures.is_empty() {

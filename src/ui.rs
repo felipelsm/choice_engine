@@ -1,10 +1,9 @@
 // Side panel + sim controls (start / pause / end).
 
-use crate::creature::Personality;
+use crate::creature::{Personality, ACTIONS, N_ACTIONS, N_STATES, STATE_NAMES, STATE_SHORT};
 use crate::font::{draw_text, text_width, GLYPH_H};
 use crate::render::{Color, Input, Key, Renderer};
-use crate::world::{action_color, World, MAX_POPULATION};
-use crate::creature::Action;
+use crate::world::{action_color, World};
 
 pub const PANEL_W: i32 = 260;
 pub const START_CREATURES: usize = 20;
@@ -206,9 +205,21 @@ impl App {
             Phase::Ended => "ENDED",
         };
         draw_text(r, phase, x0, 44, 1, 0xffc107);
-        draw_text(r, &format!("TICK: {}", w.ticks), x0, 62, 1, TEXT);
-        draw_text(r, &format!("POPULATION: {} / {}", w.creatures.len(), MAX_POPULATION), x0, 76, 1, TEXT);
-        draw_text(r, &format!("BIRTHS: {}  DEATHS: {}", w.births, w.deaths), x0, 90, 1, TEXT);
+        let time = if w.is_night() { "NIGHT" } else { "DAY" };
+        draw_text(r, &format!("TICK {}  DAY {} ({})", w.ticks, w.day(), time), x0, 58, 1, TEXT);
+        draw_text(r, &format!("POP {}  BIRTHS {}  DEATHS {}", w.creatures.len(), w.births, w.deaths), x0, 72, 1, TEXT);
+        draw_text(
+            r,
+            &format!("VILLAGES {}  SHELTERS {}  FARMS {}", w.active_villages(), w.shelters_built(), w.farms()),
+            x0, 86, 1, TEXT,
+        );
+        let n = w.creatures.len().max(1) as f32;
+        let avg_health = w.creatures.iter().map(|c| c.health).sum::<f32>() / n;
+        draw_text(
+            r,
+            &format!("STORED {:.1}  AVG HEALTH {:.0}%", w.total_stock(), avg_health * 100.0),
+            x0, 100, 1, TEXT,
+        );
 
         // buttons
         for b in self.buttons() {
@@ -230,47 +241,27 @@ impl App {
         let tw = text_width(&label, 1);
         draw_text(r, &label, x0 + (3 * 70 + 2 * 7 - tw) / 2, 120 + 26 + 8 + (26 - GLYPH_H) / 2, 1, TEXT);
 
-        // average personality
-        let mut y = 196;
-        draw_text(r, "AVERAGE PERSONALITY", x0, y, 1, TEXT);
-        y += 18;
+        // average personality heatmap
+        draw_text(r, "AVG PERSONALITY (HOVER)", x0, 192, 1, TEXT);
         match w.average_personality() {
-            Some(avg) => draw_matrix(r, &avg, x0, y),
-            None => draw_text(r, "NO CREATURES", x0, y, 1, DIM),
+            Some(avg) => draw_heatmap(r, &avg, &w.action_counts(), x0, 206, mouse),
+            None => draw_text(r, "NO CREATURES", x0, 210, 1, DIM),
         }
 
+        // population graph
+        draw_population(r, &w.history, x0, 436, 228, 46);
+
         // legend
-        let mut y = 318;
-        draw_text(r, "BODY COLOR = PERSONALITY", x0, y, 1, TEXT);
-        y += 14;
-        draw_text(r, "GREEN FOOD  BLUE WATER  RED REST", x0, y, 1, DIM);
-        y += 22;
-        draw_text(r, "CENTER DOT = ACTION", x0, y, 1, TEXT);
-        y += 14;
-        let actions = [
-            (Action::WalkToFood, "FOOD"),
-            (Action::WalkToWater, "WATER"),
-            (Action::Rest, "REST"),
-            (Action::Reproduce, "REPRODUCE"),
-        ];
-        for (i, (a, label)) in actions.iter().enumerate() {
-            let lx = x0 + (i as i32 % 2) * 90;
-            let ly = y + (i as i32 / 2) * 14;
-            r.fill_circle(lx + 3, ly + 3, 3, action_color(*a));
-            draw_text(r, label, lx + 10, ly, 1, DIM);
-        }
-        y += 36;
-        draw_text(r, "BARS = FOOD WATER HEALTH BOREDOM", x0, y, 1, TEXT);
-        y += 22;
-        draw_text(r, "AVERAGE HEALTH", x0, y, 1, TEXT);
-        let n = w.creatures.len().max(1) as f32;
-        let avg_health = w.creatures.iter().map(|c| c.health).sum::<f32>() / n;
-        let sick = w.creatures.iter().filter(|c| c.health < 1.0).count();
-        y += 14;
-        r.fill_rect(x0, y, 228, 8, 0x111111);
-        r.fill_rect(x0, y, (228.0 * avg_health) as i32, 8, 0xf44336);
-        y += 14;
-        draw_text(r, &format!("{:.0}%  ({} HURT)", avg_health * 100.0, sick), x0, y, 1, DIM);
+        let mut y = 500;
+        draw_text(r, "BODY: R WILD G SOCIAL B SETTLER", x0, y, 1, DIM);
+        y += 12;
+        draw_text(r, "DOT = ACTION (SEE ROW COLORS)", x0, y, 1, DIM);
+        y += 12;
+        draw_text(r, "BARS: FOOD WATER HEALTH BORED", x0, y, 1, DIM);
+        y += 12;
+        draw_text(r, "ORANGE = CARRIED / STORED FOOD", x0, y, 1, DIM);
+        y += 12;
+        draw_text(r, "BRIGHT GREEN = FARM", x0, y, 1, DIM);
 
         // controls
         let y = self.world_h as i32 - 56;
@@ -315,20 +306,77 @@ fn draw_cursor(r: &mut dyn Renderer, x: i32, y: i32) {
     }
 }
 
-/// Grid with state names across the top and action names down the side.
-fn draw_matrix(r: &mut dyn Renderer, m: &Personality, x0: i32, y0: i32) {
-    let col_x = |c: i32| x0 + 42 + c * 47;
-    for (c, label) in ["HUNGR", "THRST", "BORED", "HEALTH"].iter().enumerate() {
-        draw_text(r, label, col_x(c as i32), y0, 1, DIM);
+const CELL: i32 = 13;
+
+/// Heatmap of the average personality: rows = actions, columns = states.
+/// The number at the end of each row = creatures doing that action now.
+/// Hovering a cell shows its full names and exact weight.
+fn draw_heatmap(
+    r: &mut dyn Renderer,
+    m: &Personality,
+    counts: &[usize; N_ACTIONS],
+    x0: i32,
+    y0: i32,
+    mouse: Option<(i32, i32)>,
+) {
+    let gx = x0 + 32; // grid left
+    let gy = y0 + 22; // grid top
+
+    // column labels alternate between two rows so they don't run together
+    for (c, label) in STATE_SHORT.iter().enumerate() {
+        let ly = if c % 2 == 0 { y0 } else { y0 + 10 };
+        draw_text(r, label, gx + c as i32 * CELL, ly, 1, DIM);
     }
-    for (row, label) in ["FOOD", "WATER", "REST", "REPRO"].iter().enumerate() {
-        let y = y0 + 16 + row as i32 * 16;
-        draw_text(r, label, x0, y, 1, DIM);
-        for col in 0..m[row].len() {
-            let v = m[row][col];
-            // diagonal (need -> matching action) highlighted
-            let color = if row == col { 0xffffff } else { TEXT };
-            draw_text(r, &format!("{v:.2}"), col_x(col as i32), y, 1, color);
+    draw_text(r, "N", gx + N_STATES as i32 * CELL + 4, y0 + 10, 1, DIM);
+
+    for (row, action) in ACTIONS.iter().enumerate() {
+        let y = gy + row as i32 * CELL;
+        r.fill_circle(x0 + 2, y + 5, 2, action_color(*action));
+        draw_text(r, action.short(), x0 + 7, y + 3, 1, DIM);
+        for col in 0..N_STATES {
+            r.fill_rect(gx + col as i32 * CELL, y, CELL - 1, CELL - 1, heat_color(m[row][col]));
         }
+        draw_text(r, &counts[row].to_string(), gx + N_STATES as i32 * CELL + 4, y + 3, 1, TEXT);
+    }
+
+    // hover details
+    let info_y = gy + N_ACTIONS as i32 * CELL + 6;
+    let hovered = mouse.and_then(|(mx, my)| {
+        let (col, row) = ((mx - gx) / CELL, (my - gy) / CELL);
+        let inside = mx >= gx && my >= gy && (col as usize) < N_STATES && (row as usize) < N_ACTIONS;
+        inside.then_some((row as usize, col as usize))
+    });
+    match hovered {
+        Some((row, col)) => {
+            let (cx, cy) = (gx + col as i32 * CELL, gy + row as i32 * CELL);
+            r.fill_rect(cx - 1, cy - 1, CELL + 1, 1, 0xffffff);
+            r.fill_rect(cx - 1, cy + CELL - 1, CELL + 1, 1, 0xffffff);
+            r.fill_rect(cx - 1, cy - 1, 1, CELL + 1, 0xffffff);
+            r.fill_rect(cx + CELL - 1, cy - 1, 1, CELL + 1, 0xffffff);
+            draw_text(r, &format!("{} <- {}", ACTIONS[row].name(), STATE_NAMES[col]), x0, info_y, 1, TEXT);
+            draw_text(r, &format!("WEIGHT {:.2}", m[row][col]), x0, info_y + 12, 1, 0xffb300);
+        }
+        None => draw_text(r, "BRIGHTER = STRONGER PULL", x0, info_y, 1, DIM),
+    }
+}
+
+/// 0 -> dark grey, 1.3+ -> amber.
+fn heat_color(v: f32) -> Color {
+    let t = (v / 1.3).clamp(0.0, 1.0);
+    let lerp = |a: u32, b: u32| (a as f32 + (b as f32 - a as f32) * t) as u32;
+    let (r, g, b) = (lerp(0x1e, 0xff), lerp(0x1e, 0xb3), lerp(0x1e, 0x00));
+    (r << 16) | (g << 8) | b
+}
+
+/// Population over time, newest on the right, one pixel column per tick.
+fn draw_population(r: &mut dyn Renderer, history: &[usize], x: i32, y: i32, w: i32, h: i32) {
+    let shown = &history[history.len().saturating_sub(w as usize)..];
+    let max = shown.iter().copied().max().unwrap_or(1).max(1);
+    draw_text(r, &format!("POPULATION (MAX {max})"), x, y, 1, TEXT);
+    let top = y + 12;
+    r.fill_rect(x, top, w, h, 0x111111);
+    for (i, &p) in shown.iter().enumerate() {
+        let bh = (p as f32 / max as f32 * h as f32) as i32;
+        r.fill_rect(x + i as i32, top + h - bh, 1, bh, 0x4fc3f7);
     }
 }
