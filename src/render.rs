@@ -14,6 +14,7 @@ pub enum Key {
     Escape,
     Plus,
     Minus,
+    Tab,
 }
 
 /// Input gathered since the last frame.
@@ -121,6 +122,7 @@ impl Renderer for MinifbRenderer {
                 minifb::Key::Escape => Some(Key::Escape),
                 minifb::Key::Equal | minifb::Key::NumPadPlus => Some(Key::Plus),
                 minifb::Key::Minus | minifb::Key::NumPadMinus => Some(Key::Minus),
+                minifb::Key::Tab => Some(Key::Tab),
                 _ => None,
             })
             .collect();

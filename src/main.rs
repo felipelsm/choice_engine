@@ -1,4 +1,5 @@
 mod creature;
+mod culture;
 mod font;
 mod render;
 mod ui;
@@ -14,7 +15,7 @@ const HEIGHT: usize = 720;
 fn main() {
     // `cargo run -- --headless` runs without a window and prints a summary.
     if std::env::args().any(|a| a == "--headless") {
-        run_headless(900);
+        run_headless(3000);
         return;
     }
 
@@ -49,7 +50,7 @@ fn run_headless(ticks: u64) {
     app.start();
     let dt = 1.0 / 60.0;
     while app.world.ticks < ticks && app.phase == ui::Phase::Running {
-        if app.update(dt) && app.world.ticks % 10 == 0 {
+        if app.update(dt) && app.world.ticks % 100 == 0 {
             let w = &app.world;
             let counts = w.action_counts();
             let mut top: Vec<(usize, usize)> = counts.iter().copied().enumerate().collect();
@@ -66,21 +67,46 @@ fn run_headless(ticks: u64) {
                 .map(|((_, name), n)| format!("{}{}", &name[..2], n))
                 .collect();
             println!(
-                "tick {:>4}  pop {:>4}  born {:>5}  died {:>5} ({})  villages {:>2}  shelters {:>2}  farms {:>2}  stored {:>5.1}  | {}",
+                "tick {:>5} pop {:>3} fam {:>2} gen {:>3} died({}) shelters {} sprouts {:>3} piled f{:.1} w{:.1} caution {:.2} | {}",
                 w.ticks,
                 w.creatures.len(),
-                w.births,
-                w.deaths,
+                w.families_alive(),
+                w.max_generation(),
                 causes.join(" "),
-                w.active_villages(),
-                w.shelters_built(),
-                w.farms(),
-                w.total_stock(),
+                w.shelters(),
+                w.sprouts,
+                w.piled(creature::Item::Food).max(0.0),
+                w.piled(creature::Item::Wood).max(0.0),
+                w.average_caution(),
                 top.join(", ")
             );
         }
     }
     if app.world.creatures.is_empty() {
         println!("extinct at tick {}", app.world.ticks);
+    }
+    let w = &app.world;
+    let total: u64 = w.action_totals.iter().sum::<u64>().max(1);
+    let shares: Vec<String> = creature::ACTIONS
+        .iter()
+        .map(|a| format!("{} {:.1}%", a.short(), 100.0 * w.action_totals[a.index()] as f64 / total as f64))
+        .collect();
+    println!("decisions: {}", shares.join("  "));
+    let spread: Vec<String> = culture::DISCOVERIES
+        .iter()
+        .map(|d| format!("{} known by {} families", d.name(), w.culture.spread(*d)))
+        .collect();
+    println!("culture: {}", spread.join(", "));
+    for e in w.culture.log.iter().take(12) {
+        let how = match e.how {
+            culture::How::Found { by, generation } => format!("found by #{by} (gen {generation})"),
+            culture::How::TaughtBy(f) => format!("taught by family {f}"),
+        };
+        let changes: Vec<String> = e
+            .biggest
+            .iter()
+            .map(|(a, s, v)| format!("{} <- {} +{:.2}", a.name(), creature::STATE_NAMES[*s], v))
+            .collect();
+        println!("  tick {:>5} family {:>2} {:<7} {} — {}  [{}]", e.tick, e.family, e.discovery.name(), how, e.discovery.fact(), changes.join(", "));
     }
 }
