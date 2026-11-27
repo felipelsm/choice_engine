@@ -1,16 +1,21 @@
-use crate::creature::{Action, Creature, BOREDOM, HUNGER, THIRST};
-use crate::render::{Color, Renderer};
+use crate::creature::{random_personality, Action, Creature, Personality, N_ACTIONS, N_STATES};
+use crate::render::Renderer;
 
 /// Seconds between decisions.
 pub const DECISION_INTERVAL: f32 = 1.0;
 
-// How fast needs grow (per second) and how fast they get satisfied.
-const HUNGER_RATE: f32 = 0.04;
-const THIRST_RATE: f32 = 0.06;
-const BOREDOM_RATE: f32 = 0.05;
-const EAT_RATE: f32 = 0.5;
-const DRINK_RATE: f32 = 0.6;
-const DANCE_RATE: f32 = 0.3;
+/// Every this many ticks, every creature loses METABOLISM of food and water.
+const METABOLISM_EVERY: u64 = 5;
+const METABOLISM: f32 = 0.10; // 10% of a full stomach
+
+const EAT_RATE: f32 = 0.25; // food gained per second at a food source
+const DRINK_RATE: f32 = 0.25; // water gained per second at a water source
+const BOREDOM_RATE: f32 = 0.02; // boredom gained per second
+const REST_RATE: f32 = 0.15; // boredom lost per second while resting
+
+/// Births stop at this many creatures. Food and water never run out yet, so
+/// without a cap the population doubles roughly every 10 ticks.
+pub const MAX_POPULATION: usize = 500;
 
 const SPEED: f32 = 60.0; // pixels per second
 const REACH: f32 = 12.0; // close enough to eat/drink
@@ -28,10 +33,14 @@ pub struct Resource {
 }
 
 pub struct World {
+    pub width: f32,
+    pub height: f32,
     pub creatures: Vec<Creature>,
     pub resources: Vec<Resource>,
-    decision_timer: f32,
     pub ticks: u64,
+    pub births: usize,
+    pub deaths: usize,
+    decision_timer: f32,
 }
 
 impl World {
@@ -43,10 +52,19 @@ impl World {
         }
 
         let creatures = (0..n_creatures)
-            .map(|id| Creature::new(id, rand_in(width), rand_in(height)))
+            .map(|_| Creature::new(rand_in(width), rand_in(height), random_personality()))
             .collect();
 
-        Self { creatures, resources, decision_timer: 0.0, ticks: 0 }
+        Self {
+            width,
+            height,
+            creatures,
+            resources,
+            ticks: 0,
+            births: 0,
+            deaths: 0,
+            decision_timer: 0.0,
+        }
     }
 
     /// Advance the world by `dt` seconds. Returns true on frames where a
@@ -54,40 +72,88 @@ impl World {
     pub fn update(&mut self, dt: f32) -> bool {
         // --- decision tick: once every DECISION_INTERVAL seconds ---
         self.decision_timer += dt;
-        let mut decided = false;
+        let mut ticked = false;
         while self.decision_timer >= DECISION_INTERVAL {
             self.decision_timer -= DECISION_INTERVAL;
+            self.ticks += 1;
+            ticked = true;
+
+            if self.ticks % METABOLISM_EVERY == 0 {
+                for c in &mut self.creatures {
+                    c.food -= METABOLISM;
+                    c.water -= METABOLISM;
+                }
+            }
             for c in &mut self.creatures {
                 c.decide();
             }
-            self.ticks += 1;
-            decided = true;
         }
 
-        // --- continuous stuff: needs grow, creatures act on their choice ---
+        // --- continuous stuff: act on the current choice ---
+        let mut babies = Vec::new();
+        let population = self.creatures.len();
         for c in &mut self.creatures {
-            c.state[HUNGER] += HUNGER_RATE * dt;
-            c.state[THIRST] += THIRST_RATE * dt;
-            c.state[BOREDOM] += BOREDOM_RATE * dt;
+            c.boredom += BOREDOM_RATE * dt;
 
             match c.action {
-                Action::WalkToFood => seek(c, &self.resources, ResourceKind::Food, HUNGER, EAT_RATE, dt),
-                Action::WalkToWater => seek(c, &self.resources, ResourceKind::Water, THIRST, DRINK_RATE, dt),
-                Action::Dance => {
-                    c.dance_phase += dt * 10.0;
-                    c.state[BOREDOM] -= DANCE_RATE * dt;
+                Action::WalkToFood => {
+                    if walk_to(c, &self.resources, ResourceKind::Food, dt) {
+                        c.food += EAT_RATE * dt;
+                    }
+                }
+                Action::WalkToWater => {
+                    if walk_to(c, &self.resources, ResourceKind::Water, dt) {
+                        c.water += DRINK_RATE * dt;
+                    }
+                }
+                Action::Rest => {
+                    c.boredom -= REST_RATE * dt;
+                    if c.is_full() && population + babies.len() < MAX_POPULATION {
+                        babies.push(c.reproduce());
+                    }
                 }
             }
 
-            for s in &mut c.state {
-                *s = s.clamp(0.0, 1.0);
+            c.food = c.food.min(1.0);
+            c.water = c.water.min(1.0);
+            c.boredom = c.boredom.clamp(0.0, 1.0);
+        }
+
+        // --- births and deaths ---
+        self.births += babies.len();
+        self.creatures.extend(babies);
+
+        let before = self.creatures.len();
+        self.creatures.retain(|c| !c.is_dead());
+        self.deaths += before - self.creatures.len();
+
+        ticked
+    }
+
+    /// Mean of every living creature's personality matrix.
+    pub fn average_personality(&self) -> Option<Personality> {
+        if self.creatures.is_empty() {
+            return None;
+        }
+        let mut avg = [[0.0; N_STATES]; N_ACTIONS];
+        for c in &self.creatures {
+            for row in 0..N_ACTIONS {
+                for col in 0..N_STATES {
+                    avg[row][col] += c.personality[row][col];
+                }
             }
         }
-        decided
+        let n = self.creatures.len() as f32;
+        for row in avg.iter_mut() {
+            for v in row.iter_mut() {
+                *v /= n;
+            }
+        }
+        Some(avg)
     }
 
     pub fn draw(&self, r: &mut dyn Renderer) {
-        r.clear(0x2b2b2b);
+        r.fill_rect(0, 0, self.width as i32, self.height as i32, 0x2b2b2b);
 
         for res in &self.resources {
             let color = match res.kind {
@@ -98,50 +164,51 @@ impl World {
         }
 
         for c in &self.creatures {
-            let (mut x, y) = (c.x, c.y);
-            if c.action == Action::Dance {
-                x += c.dance_phase.sin() * 3.0; // wiggle
-            }
-            r.fill_circle(x as i32, y as i32, 6, action_color(c.action));
+            let (x, y) = (c.x as i32, c.y as i32);
 
-            // tiny need bars above the head: hunger, thirst, boredom
-            let bar_colors: [Color; 3] = [0x4caf50, 0x2196f3, 0xe040fb];
-            for (i, &value) in c.state.iter().enumerate() {
-                let bx = x as i32 - 9 + i as i32 * 7;
+            // body = personality color, center dot = current action
+            r.fill_circle(x, y, 6, c.color());
+            r.fill_circle(x, y, 2, action_color(c.action));
+
+            // need bars above the head: food, water (full = good), boredom (full = bad)
+            let bars = [(c.food, 0x4caf50), (c.water, 0x2196f3), (c.boredom, 0xe040fb)];
+            for (i, &(value, color)) in bars.iter().enumerate() {
+                let bx = x - 9 + i as i32 * 7;
                 let full = 10;
                 let h = (value * full as f32) as i32;
-                r.fill_rect(bx, y as i32 - 10 - full, 5, full, 0x111111);
-                r.fill_rect(bx, y as i32 - 10 - h, 5, h, bar_colors[i]);
+                r.fill_rect(bx, y - 10 - full, 5, full, 0x111111);
+                r.fill_rect(bx, y - 10 - h, 5, h, color);
             }
         }
     }
 }
 
-fn action_color(a: Action) -> Color {
+pub fn action_color(a: Action) -> u32 {
     match a {
-        Action::WalkToFood => 0xa5d6a7,
-        Action::WalkToWater => 0x90caf9,
-        Action::Dance => 0xf48fb1,
+        Action::WalkToFood => 0x4caf50,
+        Action::WalkToWater => 0x2196f3,
+        Action::Rest => 0xffffff,
     }
 }
 
-/// Walk toward the nearest resource of `kind`; when there, reduce `need`.
-fn seek(c: &mut Creature, resources: &[Resource], kind: ResourceKind, need: usize, rate: f32, dt: f32) {
+/// Walk toward the nearest resource of `kind`. Returns true once we're there.
+fn walk_to(c: &mut Creature, resources: &[Resource], kind: ResourceKind, dt: f32) -> bool {
     let target = resources
         .iter()
         .filter(|r| r.kind == kind)
         .min_by(|a, b| dist2(c, a).total_cmp(&dist2(c, b)));
 
-    let Some(t) = target else { return };
+    let Some(t) = target else { return false };
     let (dx, dy) = (t.x - c.x, t.y - c.y);
     let d = (dx * dx + dy * dy).sqrt();
 
     if d <= REACH {
-        c.state[need] -= rate * dt;
+        true
     } else {
         let step = (SPEED * dt).min(d);
         c.x += dx / d * step;
         c.y += dy / d * step;
+        false
     }
 }
 
