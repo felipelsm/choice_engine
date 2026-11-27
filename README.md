@@ -18,7 +18,7 @@ action = personality * state
 
 ### Rules
 
-- The sim starts with 10 creatures with random personalities
+- The sim starts with 100 creatures with random personalities
 - Every 5 ticks, every creature loses 10% of a full stomach of food and water
 - Standing at a food or water source refills it; resting lowers boredom
 - Resting with full food and water makes one child. The parent spends half its food and water, and the child starts with that half
