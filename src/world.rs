@@ -13,6 +13,10 @@ const DRINK_RATE: f32 = 0.25; // water gained per second at a water source
 const BOREDOM_RATE: f32 = 0.10; // boredom gained per second
 const REST_RATE: f32 = 0.15; // boredom lost per second while resting
 
+const STARVE_DAMAGE: f32 = 0.05; // health lost per second while food OR water is empty
+const HEAL_RATE: f32 = 0.02; // health gained per second while food AND water are above HEAL_ABOVE
+const HEAL_ABOVE: f32 = 0.5;
+
 /// Births stop at this many creatures. Food and water never run out yet, so
 /// without a cap the population doubles roughly every 10 ticks.
 pub const MAX_POPULATION: usize = 500;
@@ -84,14 +88,23 @@ impl World {
                     c.water -= METABOLISM;
                 }
             }
+            // decide, and reproduce right away if that's the choice
+            let population = self.creatures.len();
+            let mut babies = Vec::new();
             for c in &mut self.creatures {
                 c.decide();
+                if c.action == Action::Reproduce
+                    && c.can_reproduce()
+                    && population + babies.len() < MAX_POPULATION
+                {
+                    babies.push(c.reproduce());
+                }
             }
+            self.births += babies.len();
+            self.creatures.extend(babies);
         }
 
         // --- continuous stuff: act on the current choice ---
-        let mut babies = Vec::new();
-        let population = self.creatures.len();
         for c in &mut self.creatures {
             c.boredom += BOREDOM_RATE * dt;
 
@@ -106,23 +119,24 @@ impl World {
                         c.water += DRINK_RATE * dt;
                     }
                 }
-                Action::Rest => {
-                    c.boredom -= REST_RATE * dt;
-                    if c.is_full() && population + babies.len() < MAX_POPULATION {
-                        babies.push(c.reproduce());
-                    }
-                }
+                Action::Rest => c.boredom -= REST_RATE * dt,
+                Action::Reproduce => {} // happens once, at the decision tick
             }
 
-            c.food = c.food.min(1.0);
-            c.water = c.water.min(1.0);
+            c.food = c.food.clamp(0.0, 1.0);
+            c.water = c.water.clamp(0.0, 1.0);
             c.boredom = c.boredom.clamp(0.0, 1.0);
+
+            // health: hurt while starving or dehydrated, heal while well fed
+            if c.food <= 0.0 || c.water <= 0.0 {
+                c.health -= STARVE_DAMAGE * dt;
+            } else if c.food > HEAL_ABOVE && c.water > HEAL_ABOVE {
+                c.health += HEAL_RATE * dt;
+            }
+            c.health = c.health.min(1.0);
         }
 
-        // --- births and deaths ---
-        self.births += babies.len();
-        self.creatures.extend(babies);
-
+        // --- deaths ---
         let before = self.creatures.len();
         self.creatures.retain(|c| !c.is_dead());
         self.deaths += before - self.creatures.len();
@@ -170,10 +184,10 @@ impl World {
             r.fill_circle(x, y, 6, c.color());
             r.fill_circle(x, y, 2, action_color(c.action));
 
-            // need bars above the head: food, water (full = good), boredom (full = bad)
-            let bars = [(c.food, 0x4caf50), (c.water, 0x2196f3), (c.boredom, 0xe040fb)];
+            // bars above the head: food, water, health (full = good), boredom (full = bad)
+            let bars = [(c.food, 0x4caf50), (c.water, 0x2196f3), (c.health, 0xf44336), (c.boredom, 0xe040fb)];
             for (i, &(value, color)) in bars.iter().enumerate() {
-                let bx = x - 9 + i as i32 * 7;
+                let bx = x - 13 + i as i32 * 7;
                 let full = 10;
                 let h = (value * full as f32) as i32;
                 r.fill_rect(bx, y - 10 - full, 5, full, 0x111111);
@@ -188,6 +202,7 @@ pub fn action_color(a: Action) -> u32 {
         Action::WalkToFood => 0x4caf50,
         Action::WalkToWater => 0x2196f3,
         Action::Rest => 0xffffff,
+        Action::Reproduce => 0xffeb3b,
     }
 }
 

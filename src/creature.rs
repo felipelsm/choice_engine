@@ -1,18 +1,19 @@
-// A creature = position + food/water stores + boredom + personality matrix.
+// A creature = position + food/water/boredom/health + personality matrix.
 //
 // Each decision tick:
 //
 //   action_vector = personality * state_vector
 //
-//   [ walk_to_food  ]   [ p00 p01 p02 ]   [ hunger  ]
-//   [ walk_to_water ] = [ p10 p11 p12 ] * [ thirst  ]
-//   [ rest          ]   [ p20 p21 p22 ]   [ boredom ]
+//   [ walk_to_food  ]   [ p00 p01 p02 p03 ]   [ hunger  ]
+//   [ walk_to_water ] = [ p10 p11 p12 p13 ] * [ thirst  ]
+//   [ rest          ]   [ p20 p21 p22 p23 ]   [ boredom ]
+//   [ reproduce     ]   [ p30 p31 p32 p33 ]   [ health  ]
 //
 // where hunger = 1 - food and thirst = 1 - water.
-// Row i of the matrix = "how much does each need push me toward action i".
+// Row i of the matrix = "how much does each state push me toward action i".
 
-pub const N_STATES: usize = 3;
-pub const N_ACTIONS: usize = 3;
+pub const N_STATES: usize = 4;
+pub const N_ACTIONS: usize = 4;
 
 pub type StateVec = [f32; N_STATES];
 pub type ActionVec = [f32; N_ACTIONS];
@@ -21,11 +22,15 @@ pub type Personality = [[f32; N_STATES]; N_ACTIONS];
 /// Children get every personality entry scaled by a random factor in [1 - this, 1 + this].
 pub const MUTATION: f32 = 0.05;
 
+/// Reproducing costs this much food, water and boredom (30% of full).
+pub const REPRODUCE_COST: f32 = 0.30;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     WalkToFood,
     WalkToWater,
     Rest,
+    Reproduce,
 }
 
 impl Action {
@@ -33,7 +38,8 @@ impl Action {
         match i {
             0 => Action::WalkToFood,
             1 => Action::WalkToWater,
-            _ => Action::Rest,
+            2 => Action::Rest,
+            _ => Action::Reproduce,
         }
     }
 }
@@ -41,9 +47,10 @@ impl Action {
 pub struct Creature {
     pub x: f32,
     pub y: f32,
-    pub food: f32,    // 0 = empty (dead), 1 = full
-    pub water: f32,   // 0 = empty (dead), 1 = full
+    pub food: f32,    // 0 = empty, 1 = full
+    pub water: f32,   // 0 = empty, 1 = full
     pub boredom: f32, // 0 = fine, 1 = very bored
+    pub health: f32,  // 0 = dead, 1 = healthy
     pub personality: Personality,
     pub action: Action,
     pub last_scores: ActionVec, // likelihoods from the last decision (sum to 1)
@@ -57,6 +64,7 @@ impl Creature {
             food: 0.5 + fastrand::f32() * 0.5,
             water: 0.5 + fastrand::f32() * 0.5,
             boredom: fastrand::f32() * 0.5,
+            health: 1.0,
             personality,
             action: Action::Rest,
             last_scores: [0.0; N_ACTIONS],
@@ -64,15 +72,15 @@ impl Creature {
     }
 
     pub fn state(&self) -> StateVec {
-        [1.0 - self.food, 1.0 - self.water, self.boredom]
-    }
-
-    pub fn is_full(&self) -> bool {
-        self.food >= 1.0 && self.water >= 1.0
+        [1.0 - self.food, 1.0 - self.water, self.boredom, self.health]
     }
 
     pub fn is_dead(&self) -> bool {
-        self.food <= 0.0 || self.water <= 0.0
+        self.health <= 0.0
+    }
+
+    pub fn can_reproduce(&self) -> bool {
+        self.food >= REPRODUCE_COST && self.water >= REPRODUCE_COST
     }
 
     /// Runs once per decision tick.
@@ -90,32 +98,34 @@ impl Creature {
         self.action = Action::from_index(argmax(&self.last_scores));
     }
 
-    /// Spend half of food and water to make one child next to us.
-    /// The child starts with the half that was spent.
+    /// Spend REPRODUCE_COST of food, water and boredom to make one child next
+    /// to us. The child starts with the food and water that was spent.
     pub fn reproduce(&mut self) -> Creature {
-        self.food /= 2.0;
-        self.water /= 2.0;
+        self.food -= REPRODUCE_COST;
+        self.water -= REPRODUCE_COST;
+        self.boredom = (self.boredom - REPRODUCE_COST).max(0.0);
 
         let mut child = Creature::new(
             self.x + fastrand::f32() * 16.0 - 8.0,
             self.y + fastrand::f32() * 16.0 - 8.0,
             mutate(&self.personality),
         );
-        child.food = self.food;
-        child.water = self.water;
+        child.food = REPRODUCE_COST;
+        child.water = REPRODUCE_COST;
         child.boredom = 0.0;
         child
     }
 
     /// Color from personality.
     ///
-    /// Each row sum = how strongly the creature is driven toward that action.
-    ///   share_i = rowsum_i / (rowsum_0 + rowsum_1 + rowsum_2)
+    /// Row sum = how strongly the creature is driven toward that action.
+    /// Using only the food, water and rest rows:
+    ///   share_i = rowsum_i / (rowsum_food + rowsum_water + rowsum_rest)
     ///   channel_i = 255 * clamp(3 * share_i - 0.5, 0, 1)
-    /// An even 1/3 split gives 127 in every channel (grey). A creature that
-    /// cares mostly about food turns green, water blue, rest red.
+    /// An even split gives 127 in every channel (grey). Mostly food = green,
+    /// mostly water = blue, mostly rest = red.
     pub fn color(&self) -> u32 {
-        let sums: Vec<f32> = self.personality.iter().map(|row| row.iter().sum()).collect();
+        let sums: Vec<f32> = self.personality[..3].iter().map(|row| row.iter().sum()).collect();
         let total: f32 = sums.iter().sum::<f32>().max(1e-6);
         let ch = |i: usize| ((3.0 * sums[i] / total - 0.5).clamp(0.0, 1.0) * 255.0) as u32;
         let (g, b, r) = (ch(0), ch(1), ch(2));
@@ -144,17 +154,12 @@ fn argmax(v: &ActionVec) -> usize {
     best
 }
 
-/// Random personality biased toward "sensible": the diagonal (hunger -> food,
-/// thirst -> water, boredom -> rest) is strong, everything else is weak noise.
+/// Fully random personality: every entry uniform in 0..1, no bias.
 pub fn random_personality() -> Personality {
     let mut p = [[0.0; N_STATES]; N_ACTIONS];
-    for row in 0..N_ACTIONS {
-        for col in 0..N_STATES {
-            p[row][col] = if row == col {
-                0.5 + fastrand::f32() * 0.5 // 0.5 .. 1.0
-            } else {
-                fastrand::f32() * 0.3 // 0.0 .. 0.3
-            };
+    for row in p.iter_mut() {
+        for v in row.iter_mut() {
+            *v = fastrand::f32();
         }
     }
     p
@@ -176,54 +181,68 @@ pub fn mutate(p: &Personality) -> Personality {
 mod tests {
     use super::*;
 
-    const IDENTITY: Personality = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    const IDENTITY: Personality = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
 
     #[test]
     fn mat_vec_matches_hand_calculation() {
-        let m = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]];
-        let v = [1.0, 0.0, 2.0];
-        assert_eq!(mat_vec(&m, &v), [7.0, 16.0, 25.0]);
+        let m = [
+            [1.0, 2.0, 3.0, 4.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [2.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.5],
+        ];
+        let v = [1.0, 0.0, 2.0, 1.0];
+        // row 0: 1*1 + 2*0 + 3*2 + 4*1 = 11
+        assert_eq!(mat_vec(&m, &v), [11.0, 1.0, 2.0, 0.5]);
     }
 
     #[test]
-    fn hungry_creature_with_identity_personality_goes_to_food() {
+    fn hungry_creature_goes_to_food() {
         let mut c = Creature::new(0.0, 0.0, IDENTITY);
-        c.food = 0.1; // hunger 0.9
-        c.water = 0.8; // thirst 0.2
+        c.food = 0.0; // hunger 1.0
+        c.water = 0.8;
         c.boredom = 0.1;
+        c.health = 0.5;
         c.decide();
         assert_eq!(c.action, Action::WalkToFood);
         assert!((c.last_scores.iter().sum::<f32>() - 1.0).abs() < 1e-5);
     }
 
     #[test]
-    fn full_creature_chooses_rest() {
+    fn healthy_fed_creature_reproduces() {
         let mut c = Creature::new(0.0, 0.0, IDENTITY);
         c.food = 1.0;
         c.water = 1.0;
         c.boredom = 0.2;
+        c.health = 1.0;
         c.decide();
-        assert_eq!(c.action, Action::Rest);
+        assert_eq!(c.action, Action::Reproduce);
     }
 
     #[test]
-    fn reproducing_halves_parent_and_child_gets_the_spent_half() {
+    fn reproducing_costs_thirty_percent() {
         let mut parent = Creature::new(0.0, 0.0, IDENTITY);
         parent.food = 1.0;
-        parent.water = 1.0;
+        parent.water = 0.8;
+        parent.boredom = 0.5;
         let child = parent.reproduce();
-        assert_eq!(parent.food, 0.5);
-        assert_eq!(parent.water, 0.5);
-        assert_eq!(child.food, 0.5);
-        assert_eq!(child.water, 0.5);
+        assert!((parent.food - 0.7).abs() < 1e-5);
+        assert!((parent.water - 0.5).abs() < 1e-5);
+        assert!((parent.boredom - 0.2).abs() < 1e-5);
+        assert_eq!(child.food, REPRODUCE_COST);
+        assert_eq!(child.water, REPRODUCE_COST);
     }
 
     #[test]
     fn mutation_stays_within_five_percent() {
-        let p = [[1.0; 3]; 3];
+        let p = [[1.0; N_STATES]; N_ACTIONS];
         for _ in 0..1000 {
-            let m = mutate(&p);
-            for row in m {
+            for row in mutate(&p) {
                 for v in row {
                     assert!((0.95..=1.05).contains(&v), "{v}");
                 }
@@ -232,12 +251,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_food_or_water_is_dead() {
+    fn zero_health_is_dead() {
         let mut c = Creature::new(0.0, 0.0, IDENTITY);
-        c.food = 0.0;
-        assert!(c.is_dead());
-        c.food = 0.5;
-        c.water = 0.0;
+        assert!(!c.is_dead());
+        c.health = 0.0;
         assert!(c.is_dead());
     }
 }
