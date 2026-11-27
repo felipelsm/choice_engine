@@ -218,6 +218,11 @@ impl App {
         draw_text(r, "SPACE  PAUSE/RESUME", x0, y + 12, 1, DIM);
         draw_text(r, "E      END", x0, y + 24, 1, DIM);
         draw_text(r, "ESC    QUIT", x0, y + 36, 1, DIM);
+
+        // cursor goes last so it's on top of everything
+        if let Some((mx, my)) = mouse {
+            draw_cursor(r, mx, my);
+        }
     }
 }
 
@@ -235,6 +240,34 @@ fn draw_matrix(r: &mut dyn Renderer, m: &Personality, x0: i32, y0: i32) {
             // diagonal (need -> matching action) highlighted
             let color = if row == col { 0xffffff } else { TEXT };
             draw_text(r, &format!("{v:.2}"), col_x(col as i32), y, 1, color);
+        }
+    }
+}
+
+/// Arrow cursor: '#' = black outline, '.' = white fill.
+fn draw_cursor(r: &mut dyn Renderer, x: i32, y: i32) {
+    const ARROW: [&str; 12] = [
+        "#",
+        "##",
+        "#.#",
+        "#..#",
+        "#...#",
+        "#....#",
+        "#.....#",
+        "#......#",
+        "#....####",
+        "#..#",
+        "#.#",
+        "##",
+    ];
+    for (dy, row) in ARROW.iter().enumerate() {
+        for (dx, ch) in row.chars().enumerate() {
+            let color = match ch {
+                '#' => 0x000000,
+                '.' => 0xffffff,
+                _ => continue,
+            };
+            r.fill_rect(x + dx as i32, y + dy as i32, 1, 1, color);
         }
     }
 }

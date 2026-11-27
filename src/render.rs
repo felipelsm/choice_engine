@@ -50,6 +50,7 @@ impl MinifbRenderer {
         let mut window = minifb::Window::new(title, w, h, minifb::WindowOptions::default())
             .expect("could not open window");
         window.set_target_fps(60);
+        window.set_cursor_visibility(false); // the sim draws its own cursor (ui.rs)
         Self { window, buffer: vec![0; w * h], w, h, mouse_was_down: false }
     }
 

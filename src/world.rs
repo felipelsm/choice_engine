@@ -5,12 +5,12 @@ use crate::render::Renderer;
 pub const DECISION_INTERVAL: f32 = 1.0;
 
 /// Every this many ticks, every creature loses METABOLISM of food and water.
-const METABOLISM_EVERY: u64 = 5;
+const METABOLISM_EVERY: u64 = 2;
 const METABOLISM: f32 = 0.10; // 10% of a full stomach
 
 const EAT_RATE: f32 = 0.25; // food gained per second at a food source
 const DRINK_RATE: f32 = 0.25; // water gained per second at a water source
-const BOREDOM_RATE: f32 = 0.02; // boredom gained per second
+const BOREDOM_RATE: f32 = 0.10; // boredom gained per second
 const REST_RATE: f32 = 0.15; // boredom lost per second while resting
 
 /// Births stop at this many creatures. Food and water never run out yet, so
