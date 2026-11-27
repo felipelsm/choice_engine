@@ -14,7 +14,8 @@ const BOREDOM_RATE: f32 = 0.10; // boredom gained per second
 const REST_RATE: f32 = 0.15; // boredom lost per second while resting
 
 const STARVE_DAMAGE: f32 = 0.05; // health lost per second while food OR water is empty
-const HEAL_RATE: f32 = 0.02; // health gained per second while food AND water are above HEAL_ABOVE
+const EXHAUSTION_DAMAGE: f32 = 0.03; // health lost per second while boredom is maxed out (needs rest)
+const HEAL_RATE: f32 = 0.02; // health gained per second while fed, watered and not exhausted
 const HEAL_ABOVE: f32 = 0.5;
 
 /// Births stop at this many creatures. Food and water never run out yet, so
@@ -127,10 +128,17 @@ impl World {
             c.water = c.water.clamp(0.0, 1.0);
             c.boredom = c.boredom.clamp(0.0, 1.0);
 
-            // health: hurt while starving or dehydrated, heal while well fed
-            if c.food <= 0.0 || c.water <= 0.0 {
+            // health: hurt while starving, dehydrated or exhausted (boredom
+            // maxed because it hasn't rested); heal only when none of those
+            let starving = c.food <= 0.0 || c.water <= 0.0;
+            let exhausted = c.boredom >= 1.0;
+            if starving {
                 c.health -= STARVE_DAMAGE * dt;
-            } else if c.food > HEAL_ABOVE && c.water > HEAL_ABOVE {
+            }
+            if exhausted {
+                c.health -= EXHAUSTION_DAMAGE * dt;
+            }
+            if !starving && !exhausted && c.food > HEAL_ABOVE && c.water > HEAL_ABOVE {
                 c.health += HEAL_RATE * dt;
             }
             c.health = c.health.min(1.0);
