@@ -7,7 +7,7 @@ use crate::world::{action_color, World, MAX_POPULATION};
 use crate::creature::Action;
 
 pub const PANEL_W: i32 = 260;
-pub const START_CREATURES: usize = 100;
+pub const START_CREATURES: usize = 20;
 
 /// Sim speed options. 1.0 = one decision tick per real second.
 const SPEEDS: [f32; 7] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
