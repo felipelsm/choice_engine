@@ -5,7 +5,7 @@ use crate::render::Renderer;
 pub const DECISION_INTERVAL: f32 = 1.0;
 
 /// Every this many ticks, every creature loses METABOLISM of food and water.
-const METABOLISM_EVERY: u64 = 2;
+const METABOLISM_EVERY: u64 = 5;
 const METABOLISM: f32 = 0.10; // 10% of a full stomach
 
 const EAT_RATE: f32 = 0.25; // food gained per second at a food source
