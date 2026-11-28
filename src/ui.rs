@@ -15,11 +15,15 @@ pub const PANEL_W: i32 = 260;
 pub const START_CREATURES: usize = 20;
 
 /// Sim speed options. 1.0 = one decision tick per real second.
-const SPEEDS: [f32; 7] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
+const SPEEDS: [f32; 11] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0];
 const NORMAL_SPEED: usize = 2; // index of 1.0
 /// Biggest time step the world takes at once. Faster speeds take more steps
 /// per frame instead of bigger ones, so movement and eating stay accurate.
 const MAX_STEP: f32 = 1.0 / 60.0;
+/// ...but never more than this many steps per frame. At very high speeds the
+/// steps get longer instead (up to ~0.07 s at 256x), which is still well
+/// under the 1 s decision tick, so behavior stays the same.
+const MAX_SUBSTEPS: f32 = 64.0;
 
 const BG: Color = 0x1a1a1a;
 const TEXT: Color = 0xdddddd;
@@ -135,9 +139,10 @@ impl App {
             return false;
         }
         let mut remaining = dt * SPEEDS[self.speed];
+        let step_size = MAX_STEP.max(remaining / MAX_SUBSTEPS);
         let mut ticked = false;
         while remaining > 0.0 {
-            let step = remaining.min(MAX_STEP);
+            let step = remaining.min(step_size);
             ticked |= self.world.update(step);
             remaining -= step;
         }

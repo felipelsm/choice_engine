@@ -109,7 +109,7 @@ Three tabs (click, or press Tab):
 - **Evolution**: each family's share of the population over time, how every average gene changed since tick 0 (hover a cell to see it over time), caution over time. Creatures are colored by family on this tab
 - **Culture**: learned matrix (average, or a clicked creature's family), which discoveries each family knows, and the discovery log with what each lesson strengthened
 
-Click a creature to inspect it (its home is marked with a white square); click empty ground to go back to averages. Start / pause / end with the buttons or Enter / Space / E. Speed 0.25x to 16x with - / +. Esc quits.
+Click a creature to inspect it (its home is marked with a white square); click empty ground to go back to averages. Start / pause / end with the buttons or Enter / Space / E. Speed 0.25x to 256x with - / + (use `cargo run --release` for the top speeds). Esc quits.
 
 ## Running
 
