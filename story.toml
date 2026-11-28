@@ -1,0 +1,30 @@
+# Story NPCs. Loaded at start if this file exists (or pass --story <file>).
+# Everything they know is marked AUTHORED in the logs.
+#
+# mind:    simple | villager | story   (story = authored methods + planning)
+# methods: plant, store_food, bring_wood_home, group_hunt
+# traits:  any of stubbornness deliberation speed patience curiosity memory
+#          aggression courage vengefulness loyalty sociability thrift
+#          charisma ambition conformity strength (0 to 1)
+
+[[npc]]
+name = "Old Builder"
+mind = "story"
+x = 380
+y = 360
+lifespan = 1500
+methods = ["bring_wood_home", "plant"]
+traits = { sociability = 0.9, patience = 0.9, charisma = 0.7, aggression = 0.1, thrift = 0.6 }
+
+[[npc.knows]]
+discovery = "WARMTH"
+note = "Learned it from the mountain people"
+
+[[npc]]
+name = "Traveler"
+mind = "story"
+x = 100
+y = 100
+lifespan = 3000
+wanderer = true
+traits = { sociability = 1.0, thrift = 0.0, curiosity = 1.0, courage = 0.9, strength = 0.8, aggression = 0.0 }
